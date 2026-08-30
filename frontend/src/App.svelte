@@ -18,6 +18,7 @@
   let connected = false;
   let notice = '';
   let inspectorOpen = true;
+  let timelineOpen = true;
   let aiContext = null;
   let aiContextLoading = false;
   let activityLog = [];
@@ -532,7 +533,7 @@
   </header>
 
   <div class="dashboard" class:inspector-closed={!inspectorOpen}>
-    <section class="left-panel">
+    <section class="left-panel" class:timeline-collapsed={!timelineOpen}>
       <nav class="toolbar" aria-label="Map controls">
         <div class="control-group">
           <span>Show</span>
@@ -597,20 +598,31 @@
       <section class="timeline" aria-label="Commits over time">
         <div class="timeline-head">
           <span>Commits over time</span>
-          <em>{graph?.activity?.length ?? 0} weeks · live local Git history</em>
-        </div>
-        <div class="bars">
-          {#each graph?.activity ?? [] as bucket, index}
+          <div>
+            <em>{graph?.activity?.length ?? 0} weeks · live local Git history</em>
             <button
-              class:hot={index >= (graph?.activity?.length ?? 0) - 4}
-              aria-label={timelineLabel(bucket)}
-              title={timelineLabel(bucket)}
-              style={`height: ${barHeight(bucket.count)}`}
+              aria-label={timelineOpen ? 'Collapse commit timeline' : 'Expand commit timeline'}
+              title={timelineOpen ? 'Collapse commit timeline' : 'Expand commit timeline'}
+              onclick={() => timelineOpen = !timelineOpen}
             >
-              <span>{timelineLabel(bucket)}</span>
+              {timelineOpen ? 'Hide' : 'Show'}
             </button>
-          {/each}
+          </div>
         </div>
+        {#if timelineOpen}
+          <div class="bars">
+            {#each graph?.activity ?? [] as bucket, index}
+              <button
+                class:hot={index >= (graph?.activity?.length ?? 0) - 4}
+                aria-label={timelineLabel(bucket)}
+                title={timelineLabel(bucket)}
+                style={`height: ${barHeight(bucket.count)}`}
+              >
+                <span>{timelineLabel(bucket)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </section>
     </section>
 
@@ -734,6 +746,7 @@
   .dashboard { min-height: 0; flex: 1 1 auto; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(430px, 490px); }
   .dashboard.inspector-closed { grid-template-columns: minmax(0, 1fr); }
   .left-panel { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px minmax(0, 1fr) 158px; border-right: 1px solid #172332; overflow: hidden; }
+  .left-panel.timeline-collapsed { grid-template-rows: 46px minmax(0, 1fr) 42px; }
   .dashboard.inspector-closed .left-panel { border-right: 0; }
   .toolbar { gap: 12px; padding: 0 12px; border-bottom: 1px solid #121d2a; background: #080e15; overflow-x: auto; }
   .control-group { gap: 8px; }
@@ -752,8 +765,13 @@
   .map-legend .bridge { background: #d49a3c; }
   .map-legend .related { background: repeating-linear-gradient(90deg, #7d8794 0 5px, transparent 5px 9px); }
   .timeline { min-height: 0; padding: 13px 18px 16px; border-top: 1px solid #172332; background: #081018; overflow: hidden; }
+  .timeline-collapsed .timeline { padding: 11px 18px; }
   .timeline-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .timeline-collapsed .timeline-head { margin-bottom: 0; }
+  .timeline-head div { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .timeline-head em { color: #596b7f; font: 0.7rem ui-monospace, Consolas, monospace; font-style: normal; }
+  .timeline-head button { border: 1px solid #1d3143; border-radius: 7px; padding: 5px 8px; color: #9eb2c4; background: #0d1824; font-size: 0.68rem; font-weight: 800; line-height: 1; cursor: pointer; }
+  .timeline-head button:hover { color: #edf5fb; background: #17283a; }
   .bars { height: 96px; display: grid; grid-template-columns: repeat(24, minmax(10px, 1fr)); align-items: end; gap: 6px; }
   .bars button { min-width: 0; border: 0; border-radius: 5px 5px 2px 2px; background: #1a2634; cursor: pointer; position: relative; }
   .bars button.hot { background: linear-gradient(180deg, #ff9941, #e7a645); }
@@ -834,6 +852,7 @@
   @media (max-width: 680px) {
     header { align-items: flex-start; height: auto; padding: 16px; gap: 14px; flex-direction: column; }
     .left-panel { grid-template-rows: auto 64vh 180px; }
+    .left-panel.timeline-collapsed { grid-template-rows: auto 64vh 42px; }
     .toolbar { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
     .scope-filter, .activity-filter { margin-left: 0; padding-left: 0; border-left: 0; }
     .map-legend { display: none; }
