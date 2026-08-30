@@ -733,7 +733,7 @@
   .sync.online i { background: #35d07f; box-shadow: 0 0 14px rgba(53, 208, 127, 0.7); }
   .dashboard { min-height: 0; flex: 1 1 auto; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) minmax(430px, 490px); }
   .dashboard.inspector-closed { grid-template-columns: minmax(0, 1fr); }
-  .left-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px minmax(0, 1fr) 158px; border-right: 1px solid #172332; overflow: hidden; }
+  .left-panel { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px minmax(0, 1fr) 158px; border-right: 1px solid #172332; overflow: hidden; }
   .dashboard.inspector-closed .left-panel { border-right: 0; }
   .toolbar { gap: 12px; padding: 0 12px; border-bottom: 1px solid #121d2a; background: #080e15; overflow-x: auto; }
   .control-group { gap: 8px; }
@@ -742,7 +742,7 @@
   .control-group button { border: 0; border-radius: 6px; padding: 6px 9px; color: #8293a5; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 750; line-height: 1; white-space: nowrap; }
   .control-group button.active { color: #dbe6ef; background: #223247; }
   .scope-filter, .activity-filter { margin-left: 4px; padding-left: 12px; border-left: 1px solid #182635; }
-  .notice { padding: 9px 22px; color: #f6c56e; background: #211a10; font-size: 0.8rem; }
+  .notice { position: absolute; left: 16px; top: 58px; z-index: 8; max-width: min(520px, calc(100% - 32px)); padding: 8px 10px; border: 1px solid #26394d; border-radius: 8px; color: #c7d6e4; background: rgba(9, 15, 23, 0.94); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26); font-size: 0.78rem; pointer-events: none; }
   .map-shell { position: relative; min-height: 0; background: radial-gradient(circle at 1px 1px, #132130 1px, transparent 0) 0 0 / 36px 36px, #0b1119; overflow: hidden; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: #708898; z-index: 2; }
   .map-legend { position: absolute; left: 16px; top: 16px; z-index: 4; gap: 12px; padding: 8px 10px; border: 1px solid #17283a; border-radius: 8px; color: #76889b; background: rgba(8, 14, 21, 0.84); font-size: 0.72rem; pointer-events: none; }
