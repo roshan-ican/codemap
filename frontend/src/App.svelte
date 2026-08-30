@@ -28,13 +28,13 @@
   let marqueeStart = null;
   let activityLog = [];
   const viewOptions = [
-    { id: 'calls', label: 'What calls what' },
-    { id: 'changes', label: 'Changes together' },
-    { id: 'both', label: 'Both' }
+    { id: 'calls', label: 'What calls what', shortcut: '3' },
+    { id: 'changes', label: 'Changes together', shortcut: '4' },
+    { id: 'both', label: 'Both', shortcut: '5' }
   ];
   const toolOptions = [
-    { id: 'pan', label: 'Pan' },
-    { id: 'select', label: 'Area select' }
+    { id: 'pan', label: 'Pan', shortcut: '1' },
+    { id: 'select', label: 'Area select', shortcut: '2' }
   ];
   const periodOptions = [
     { id: '30', label: '30d' },
@@ -42,10 +42,10 @@
     { id: 'all', label: 'All' }
   ];
   const scopeOptions = [
-    { id: 'all', label: 'All' },
-    { id: 'frontend', label: 'Frontend' },
-    { id: 'backend', label: 'Backend' },
-    { id: 'tests', label: 'Tests' }
+    { id: 'all', label: 'All', shortcut: '6' },
+    { id: 'frontend', label: 'Frontend', shortcut: '7' },
+    { id: 'backend', label: 'Backend', shortcut: '8' },
+    { id: 'tests', label: 'Tests', shortcut: '9' }
   ];
   const categoryOrder = ['frontend', 'backend', 'tests'];
 
@@ -346,6 +346,9 @@
 
   function setMapTool(nextTool) {
     mapTool = nextTool;
+    marqueeStart = null;
+    marquee = null;
+    clearMarqueeListeners();
   }
 
   function setScope(nextScope) {
@@ -354,6 +357,33 @@
     selectedIds = [];
     aiContext = null;
     renderGraph();
+  }
+
+  function handleShortcut(event) {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+    const key = event.key;
+    const tool = toolOptions.find((option) => option.shortcut === key);
+    if (tool) {
+      event.preventDefault();
+      setMapTool(tool.id);
+      return;
+    }
+    const viewOption = viewOptions.find((option) => option.shortcut === key);
+    if (viewOption) {
+      event.preventDefault();
+      setView(viewOption.id);
+      return;
+    }
+    const scopeOption = scopeOptions.find((option) => option.shortcut === key);
+    if (scopeOption) {
+      event.preventDefault();
+      setScope(scopeOption.id);
+    }
+  }
+
+  function isTypingTarget(target) {
+    const tag = target?.tagName?.toLowerCase();
+    return target?.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
   }
 
   function edgeClass(edge) {
@@ -684,6 +714,7 @@
   onMount(() => {
     loadGraph();
     mapShell?.addEventListener('pointerdown', handleMarqueePointerDown, { capture: true });
+    window.addEventListener('keydown', handleShortcut);
     const events = new EventSource('/events');
     events.addEventListener('ready', () => {
       connected = true;
@@ -704,6 +735,7 @@
     return () => {
       events.close();
       mapShell?.removeEventListener('pointerdown', handleMarqueePointerDown, { capture: true });
+      window.removeEventListener('keydown', handleShortcut);
       clearMarqueeListeners();
     };
   });
@@ -730,19 +762,19 @@
   <div class="dashboard" class:inspector-closed={!inspectorOpen}>
     <section class="left-panel" class:timeline-collapsed={!timelineOpen}>
       <nav class="toolbar" aria-label="Map controls">
-        <div class="control-group">
-          <span>Show</span>
-          <div>
-            {#each viewOptions as option}
-              <button class:active={view === option.id} onclick={() => setView(option.id)}>{option.label}</button>
-            {/each}
-          </div>
-        </div>
         <div class="control-group tool-filter">
           <span>Tool</span>
           <div>
             {#each toolOptions as option}
-              <button class:active={mapTool === option.id} onclick={() => setMapTool(option.id)}>{option.label}</button>
+              <button class:active={mapTool === option.id} onclick={() => setMapTool(option.id)}><span>{option.label}</span><kbd>{option.shortcut}</kbd></button>
+            {/each}
+          </div>
+        </div>
+        <div class="control-group">
+          <span>Show</span>
+          <div>
+            {#each viewOptions as option}
+              <button class:active={view === option.id} onclick={() => setView(option.id)}><span>{option.label}</span><kbd>{option.shortcut}</kbd></button>
             {/each}
           </div>
         </div>
@@ -750,7 +782,7 @@
           <span>Scope</span>
           <div>
             {#each scopeOptions as option}
-              <button class:active={scope === option.id} onclick={() => setScope(option.id)}>{option.label}</button>
+              <button class:active={scope === option.id} onclick={() => setScope(option.id)}><span>{option.label}</span><kbd>{option.shortcut}</kbd></button>
             {/each}
           </div>
         </div>
@@ -963,8 +995,10 @@
   .control-group { gap: 8px; }
   .control-group > span, .timeline-head span, .eyebrow, h3 { color: #65768a; font: 800 0.62rem ui-monospace, Consolas, monospace; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
   .control-group > div { gap: 2px; padding: 3px; border: 1px solid #182839; border-radius: 8px; background: #0b141f; }
-  .control-group button { border: 0; border-radius: 6px; padding: 6px 9px; color: #8293a5; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 750; line-height: 1; white-space: nowrap; }
+  .control-group button { border: 0; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 7px; color: #8293a5; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 750; line-height: 1; white-space: nowrap; }
   .control-group button.active { color: #dbe6ef; background: #223247; }
+  .control-group kbd { min-width: 1ch; color: #5f7286; font: 800 0.62rem ui-monospace, Consolas, monospace; }
+  .control-group button.active kbd { color: #a9c3dc; }
   .tool-filter, .scope-filter, .activity-filter { margin-left: 4px; padding-left: 12px; border-left: 1px solid #182635; }
   .notice { position: absolute; left: 16px; top: 58px; z-index: 8; max-width: min(520px, calc(100% - 32px)); padding: 8px 10px; border: 1px solid #26394d; border-radius: 8px; color: #c7d6e4; background: rgba(9, 15, 23, 0.94); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26); font-size: 0.78rem; pointer-events: none; }
   .map-shell { position: relative; min-height: 0; background: radial-gradient(circle at 1px 1px, #132130 1px, transparent 0) 0 0 / 36px 36px, #0b1119; overflow: hidden; }
