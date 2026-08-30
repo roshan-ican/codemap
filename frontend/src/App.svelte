@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { Background, BackgroundVariant, Controls, SvelteFlow } from '@xyflow/svelte';
+  import { Background, BackgroundVariant, Controls, SelectionMode, SvelteFlow } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import CodeCard from './CodeCard.svelte';
 
@@ -12,6 +12,7 @@
   let selectedId = '';
   let selectedIds = [];
   let view = 'changes';
+  let mapTool = 'pan';
   let scope = 'all';
   let period = '30';
   let loading = true;
@@ -27,6 +28,10 @@
     { id: 'calls', label: 'What calls what' },
     { id: 'changes', label: 'Changes together' },
     { id: 'both', label: 'Both' }
+  ];
+  const toolOptions = [
+    { id: 'pan', label: 'Pan' },
+    { id: 'select', label: 'Select' }
   ];
   const periodOptions = [
     { id: '30', label: '30d' },
@@ -336,6 +341,10 @@
     renderGraph();
   }
 
+  function setMapTool(nextTool) {
+    mapTool = nextTool;
+  }
+
   function setScope(nextScope) {
     scope = nextScope;
     selectedId = '';
@@ -634,6 +643,14 @@
             {/each}
           </div>
         </div>
+        <div class="control-group tool-filter">
+          <span>Tool</span>
+          <div>
+            {#each toolOptions as option}
+              <button class:active={mapTool === option.id} onclick={() => setMapTool(option.id)}>{option.label}</button>
+            {/each}
+          </div>
+        </div>
         <div class="control-group scope-filter">
           <span>Scope</span>
           <div>
@@ -654,7 +671,7 @@
 
       {#if notice}<div class="notice" role="status">{notice}</div>{/if}
 
-      <section class="map-shell" aria-label="Repository code map">
+      <section class="map-shell" class:select-mode={mapTool === 'select'} aria-label="Repository code map">
         <div class="map-legend" aria-label="Connection colors">
           <span><i class="frontend"></i>frontend</span>
           <span><i class="backend"></i>backend</span>
@@ -678,7 +695,9 @@
             onnodeclick={handleNodeClick}
             onnodecontextmenu={handleNodeContextMenu}
             onselectionchange={handleSelectionChange}
-            selectionOnDrag
+            panOnDrag={mapTool === 'pan'}
+            selectionOnDrag={mapTool === 'select'}
+            selectionMode={SelectionMode.Partial}
             nodesConnectable={false}
             deleteKey={null}
             proOptions={{ hideAttribution: true }}
@@ -848,9 +867,10 @@
   .control-group > div { gap: 2px; padding: 3px; border: 1px solid #182839; border-radius: 8px; background: #0b141f; }
   .control-group button { border: 0; border-radius: 6px; padding: 6px 9px; color: #8293a5; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 750; line-height: 1; white-space: nowrap; }
   .control-group button.active { color: #dbe6ef; background: #223247; }
-  .scope-filter, .activity-filter { margin-left: 4px; padding-left: 12px; border-left: 1px solid #182635; }
+  .tool-filter, .scope-filter, .activity-filter { margin-left: 4px; padding-left: 12px; border-left: 1px solid #182635; }
   .notice { position: absolute; left: 16px; top: 58px; z-index: 8; max-width: min(520px, calc(100% - 32px)); padding: 8px 10px; border: 1px solid #26394d; border-radius: 8px; color: #c7d6e4; background: rgba(9, 15, 23, 0.94); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26); font-size: 0.78rem; pointer-events: none; }
   .map-shell { position: relative; min-height: 0; background: radial-gradient(circle at 1px 1px, #132130 1px, transparent 0) 0 0 / 36px 36px, #0b1119; overflow: hidden; }
+  .map-shell.select-mode { cursor: crosshair; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: #708898; z-index: 2; }
   .map-legend { position: absolute; left: 16px; top: 16px; z-index: 4; gap: 12px; padding: 8px 10px; border: 1px solid #17283a; border-radius: 8px; color: #76889b; background: rgba(8, 14, 21, 0.84); font-size: 0.72rem; pointer-events: none; }
   .map-legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -945,6 +965,7 @@
   :global(.svelte-flow__edge.mixed-thread.active-edge .svelte-flow__edge-path), :global(.svelte-flow__edge.bridge-edge.active-edge .svelte-flow__edge-path) { stroke: #6ee7b7; filter: drop-shadow(0 0 7px rgba(110, 231, 183, 0.36)); }
   :global(.svelte-flow__edge.indirect-edge.active-edge .svelte-flow__edge-path) { filter: drop-shadow(0 0 7px currentColor); }
   :global(.svelte-flow__edge-text), :global(.svelte-flow__edge-textbg) { display: none; }
+  :global(.svelte-flow__selection) { border-color: #7dd3fc; background: rgba(55, 196, 238, 0.11); }
   :global(.svelte-flow__controls) { border: 1px solid #1d3143; border-radius: 8px; overflow: hidden; box-shadow: none; }
   :global(.svelte-flow__controls-button) { border: 0; border-bottom: 1px solid #1d3143; color: #a7bfce; background: #0f1b27; }
   :global(.svelte-flow__controls-button:hover) { background: #17293a; }
@@ -959,7 +980,7 @@
     .left-panel { grid-template-rows: auto 64vh 180px; }
     .left-panel.timeline-collapsed { grid-template-rows: auto 64vh 42px; }
     .toolbar { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
-    .scope-filter, .activity-filter { margin-left: 0; padding-left: 0; border-left: 0; }
+    .tool-filter, .scope-filter, .activity-filter { margin-left: 0; padding-left: 0; border-left: 0; }
     .map-legend { display: none; }
     .stat-grid { grid-template-columns: 1fr; }
     .stat-grid div { border-right: 0; border-bottom: 1px solid #172332; }
