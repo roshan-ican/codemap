@@ -19,6 +19,7 @@
   let notice = '';
   let inspectorOpen = true;
   let timelineOpen = true;
+  let testsPulledOut = false;
   let aiContext = null;
   let aiContextLoading = false;
   let activityLog = [];
@@ -69,6 +70,11 @@
       ...roots.map((node) => node.id),
       ...apiNodes.filter((node) => node.change).map((node) => node.id)
     ]);
+    if (testsPulledOut) {
+      for (const node of apiNodes.filter((item) => nodeArea(item) === 'tests')) {
+        visibleIds.add(node.id);
+      }
+    }
     const visibleNodes = apiNodes.filter((node) => visibleIds.has(node.id));
     return {
       nodes: visibleNodes,
@@ -155,6 +161,7 @@
   }
 
   function nodeArea(node) {
+    if (categoryOrder.includes(node.area)) return node.area;
     const id = String(node.id ?? '').toLowerCase();
     const language = String(node.language ?? '').toLowerCase();
     if (isTestFile(id)) return 'tests';
@@ -234,6 +241,10 @@
     const previousPositions = new Map(nodes.map((node) => [node.id, node.position]));
     const incoming = new Map(apiNodes.map((node) => [node.id, 0]));
     const outgoing = new Map(apiNodes.map((node) => [node.id, []]));
+    const testOrder = apiNodes
+      .filter((node) => nodeArea(node) === 'tests' && !String(node.id).startsWith('__'))
+      .map((node) => node.id)
+      .sort((left, right) => String(left).localeCompare(String(right)));
 
     for (const edge of apiEdges.filter((edge) => edge.kind !== 'bridge')) {
       incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
@@ -273,12 +284,17 @@
     for (const [depth, level] of [...nodesByDepth.entries()].sort(([left], [right]) => left - right)) {
       level.forEach((node, index) => {
         const isScopeNode = String(node.id).startsWith('__');
+        const area = nodeArea(node);
+        const testIndex = testOrder.indexOf(node.id);
+        const pulledTestPosition = testsPulledOut && area === 'tests' && !isScopeNode
+          ? { x: 360 + (testIndex % 6) * horizontalGap, y: 520 + Math.floor(testIndex / 6) * verticalGap }
+          : null;
         result.push({
           id: node.id,
           type: 'code',
-          data: node,
+          data: { ...node, pulledOut: Boolean(pulledTestPosition) },
           selected: selectedSet.has(node.id),
-          position: previousPositions.get(node.id) ?? {
+          position: pulledTestPosition ?? previousPositions.get(node.id) ?? {
             x: isScopeNode ? 0 : (depth + 1) * horizontalGap,
             y: isScopeNode ? scopeNodeY(node.id) : index * verticalGap
           },
@@ -309,6 +325,7 @@
       target: edge.to,
       type: 'bezier',
       interactionWidth: 28,
+      animated: testsPulledOut && edgeTouchesArea(edge, 'tests'),
       data: { kind: edge.kind },
       class: edgeClass(edge)
     }));
@@ -331,8 +348,34 @@
     const selected = new Set(selectedIds);
     return [
       edge.kind === 'indirect' ? 'indirect-edge' : edge.kind === 'bridge' ? 'bridge-edge' : edge.kind === 'category' ? 'category-edge' : 'code-edge',
+      `${edgeArea(edge)}-thread`,
       selected.size > 0 && (selected.has(edge.from) || selected.has(edge.to)) ? 'active-edge' : ''
     ].filter(Boolean).join(' ');
+  }
+
+  function edgeArea(edge) {
+    if (edge.kind === 'bridge') return 'bridge';
+    const fromArea = nodeAreaById(edge.from);
+    const toArea = nodeAreaById(edge.to);
+    if (fromArea && fromArea === toArea) return fromArea;
+    if (fromArea && toArea && fromArea !== toArea) {
+      return fromArea === 'tests' || toArea === 'tests' ? 'tests' : 'mixed';
+    }
+    if (fromArea) return fromArea;
+    if (toArea) return toArea;
+    return 'mixed';
+  }
+
+  function edgeTouchesArea(edge, area) {
+    return nodeAreaById(edge.from) === area || nodeAreaById(edge.to) === area;
+  }
+
+  function nodeAreaById(id) {
+    if (!id || !graph) return '';
+    const category = String(id).replace(/^__|__$/g, '');
+    if (categoryOrder.includes(category)) return category;
+    const node = graph.nodes.find((item) => item.id === id);
+    return node ? nodeArea(node) : '';
   }
 
   function syncSelectionStyles() {
@@ -521,6 +564,14 @@
     if ('detail' in event && event.detail >= 2) openNode(node.id);
   }
 
+  function handleNodeContextMenu({ node, event }) {
+    if (node.id !== '__tests__') return;
+    event?.preventDefault();
+    testsPulledOut = !testsPulledOut;
+    nodes = [];
+    renderGraph();
+  }
+
   function handleSelectionChange({ nodes: selectedNodes }) {
     const nextIds = selectedNodes.map((node) => node.id);
     if (nextIds.join('\0') === selectedIds.join('\0')) return;
@@ -605,8 +656,10 @@
 
       <section class="map-shell" aria-label="Repository code map">
         <div class="map-legend" aria-label="Connection colors">
-          <span><i class="direct"></i>code link</span>
-          <span><i class="bridge"></i>frontend/backend</span>
+          <span><i class="frontend"></i>frontend</span>
+          <span><i class="backend"></i>backend</span>
+          <span><i class="tests"></i>tests</span>
+          <span><i class="mixed"></i>cross</span>
           <span><i class="related"></i>collapsed path</span>
         </div>
         {#if loading}
@@ -623,6 +676,7 @@
             minZoom={0.12}
             maxZoom={1.8}
             onnodeclick={handleNodeClick}
+            onnodecontextmenu={handleNodeContextMenu}
             onselectionchange={handleSelectionChange}
             selectionOnDrag
             nodesConnectable={false}
@@ -801,8 +855,10 @@
   .map-legend { position: absolute; left: 16px; top: 16px; z-index: 4; gap: 12px; padding: 8px 10px; border: 1px solid #17283a; border-radius: 8px; color: #76889b; background: rgba(8, 14, 21, 0.84); font-size: 0.72rem; pointer-events: none; }
   .map-legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .map-legend i { width: 18px; height: 3px; border-radius: 999px; }
-  .map-legend .direct { background: #37c4ee; }
-  .map-legend .bridge { background: #d49a3c; }
+  .map-legend .frontend { background: #37c4ee; }
+  .map-legend .backend { background: #d49a3c; }
+  .map-legend .tests { background: #a78bfa; }
+  .map-legend .mixed { background: #6ee7b7; }
   .map-legend .related { background: repeating-linear-gradient(90deg, #7d8794 0 5px, transparent 5px 9px); }
   .timeline { min-height: 0; padding: 13px 18px 16px; border-top: 1px solid #172332; background: #081018; overflow: hidden; }
   .timeline-collapsed .timeline { padding: 11px 18px; }
@@ -873,12 +929,21 @@
   .open-button { width: calc(100% - 44px); margin: 22px 22px; border: 0; border-radius: 8px; padding: 9px 12px; color: #061018; background: #67e8f9; font-weight: 800; cursor: pointer; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   :global(.svelte-flow) { background: transparent; }
+  :global(.svelte-flow__node) { transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
   :global(.svelte-flow__edge-path) { stroke: rgba(73, 96, 114, 0.3); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; filter: none; }
-  :global(.svelte-flow__edge.active-edge .svelte-flow__edge-path) { stroke: #37c4ee; stroke-width: 2.6; filter: drop-shadow(0 0 7px rgba(55, 196, 238, 0.42)); }
-  :global(.svelte-flow__edge.category-edge .svelte-flow__edge-path) { stroke: rgba(55, 196, 238, 0.38); stroke-width: 1.7; }
-  :global(.svelte-flow__edge.bridge-edge .svelte-flow__edge-path) { stroke: #d49a3c; stroke-width: 2.3; filter: drop-shadow(0 0 6px rgba(212, 154, 60, 0.34)); }
+  :global(.svelte-flow__edge.frontend-thread .svelte-flow__edge-path) { stroke: rgba(55, 196, 238, 0.5); }
+  :global(.svelte-flow__edge.backend-thread .svelte-flow__edge-path) { stroke: rgba(212, 154, 60, 0.5); }
+  :global(.svelte-flow__edge.tests-thread .svelte-flow__edge-path) { stroke: rgba(167, 139, 250, 0.58); }
+  :global(.svelte-flow__edge.mixed-thread .svelte-flow__edge-path) { stroke: rgba(110, 231, 183, 0.46); }
+  :global(.svelte-flow__edge.category-edge .svelte-flow__edge-path) { stroke-width: 1.8; }
+  :global(.svelte-flow__edge.bridge-edge .svelte-flow__edge-path) { stroke: #6ee7b7; stroke-width: 2.3; filter: drop-shadow(0 0 6px rgba(110, 231, 183, 0.32)); }
   :global(.svelte-flow__edge.indirect-edge .svelte-flow__edge-path) { stroke: rgba(151, 122, 76, 0.34); stroke-width: 1.3; stroke-dasharray: 7 10; }
-  :global(.svelte-flow__edge.indirect-edge.active-edge .svelte-flow__edge-path) { stroke: #d49a3c; filter: drop-shadow(0 0 7px rgba(212, 154, 60, 0.38)); }
+  :global(.svelte-flow__edge.active-edge .svelte-flow__edge-path) { stroke-width: 2.7; }
+  :global(.svelte-flow__edge.frontend-thread.active-edge .svelte-flow__edge-path) { stroke: #37c4ee; filter: drop-shadow(0 0 7px rgba(55, 196, 238, 0.42)); }
+  :global(.svelte-flow__edge.backend-thread.active-edge .svelte-flow__edge-path) { stroke: #d49a3c; filter: drop-shadow(0 0 7px rgba(212, 154, 60, 0.38)); }
+  :global(.svelte-flow__edge.tests-thread.active-edge .svelte-flow__edge-path) { stroke: #a78bfa; filter: drop-shadow(0 0 7px rgba(167, 139, 250, 0.42)); }
+  :global(.svelte-flow__edge.mixed-thread.active-edge .svelte-flow__edge-path), :global(.svelte-flow__edge.bridge-edge.active-edge .svelte-flow__edge-path) { stroke: #6ee7b7; filter: drop-shadow(0 0 7px rgba(110, 231, 183, 0.36)); }
+  :global(.svelte-flow__edge.indirect-edge.active-edge .svelte-flow__edge-path) { filter: drop-shadow(0 0 7px currentColor); }
   :global(.svelte-flow__edge-text), :global(.svelte-flow__edge-textbg) { display: none; }
   :global(.svelte-flow__controls) { border: 1px solid #1d3143; border-radius: 8px; overflow: hidden; box-shadow: none; }
   :global(.svelte-flow__controls-button) { border: 0; border-bottom: 1px solid #1d3143; color: #a7bfce; background: #0f1b27; }

@@ -8,7 +8,7 @@
 </script>
 
 <Handle type="target" position={Position.Top} />
-<article class:selected class:scope={isScope} class:changed={Boolean(data.change)} class:affected={data.affected} class:root={data.isRoot} data-status={data.change?.status ?? ''} data-area={data.area ?? ''}>
+<article class:selected class:scope={isScope} class:pulled={data.pulledOut} class:changed={Boolean(data.change)} class:affected={data.affected} class:root={data.isRoot} data-status={data.change?.status ?? ''} data-area={data.area ?? ''}>
   <div class="topline">
     <span>{data.language || 'source'}</span>
     <em>{activity}</em>
@@ -33,6 +33,7 @@
   article.scope { width: 250px; min-height: 118px; border-color: #2b6a80; background: #0b1a25; }
   article.scope[data-area='backend'] { border-color: #9f6828; background: #1a1510; }
   article.scope[data-area='tests'] { border-color: #6f5ca8; background: #151422; }
+  article.scope[data-area='tests'] { cursor: context-menu; }
   article.scope h3 { font-size: 1.08rem; }
   article.scope .topline em, article.scope .diff { display: none; }
   article.scope .rail span { width: 100% !important; background: #45bfe3; }
@@ -40,6 +41,7 @@
   article.scope[data-area='tests'] .rail span { background: #a78bfa; }
   article.changed { border-color: #a7672a; background: #15181a; }
   article.affected { border-style: dashed; opacity: 0.78; }
+  article.pulled { border-color: #a78bfa; box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.24), 0 18px 42px rgba(0, 0, 0, 0.34); }
   article[data-status='A'] { border-color: #2f8f66; }
   article[data-status='D'] { border-color: #a4475d; }
   article[data-status='R'] { border-color: #2f84a4; }
