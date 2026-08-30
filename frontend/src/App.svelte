@@ -453,14 +453,18 @@
   }
 
   function relatedNodes(direction) {
-    if (!graph || !selectedId) return [];
+    if (!graph) return [];
+    const activeIds = uniqueIds([selectedId, ...selectedIds]);
+    if (activeIds.length === 0) return [];
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-    const ids = [];
-    for (const edge of graph.edges) {
-      if (direction === 'out' && edge.from === selectedId) ids.push(edge.to);
-      if (direction === 'in' && edge.to === selectedId) ids.push(edge.from);
+    const ids = new Set();
+    for (const activeId of activeIds) {
+      for (const edge of graph.edges) {
+        if (direction === 'out' && edge.from === activeId) ids.add(edge.to);
+        if (direction === 'in' && edge.to === activeId) ids.add(edge.from);
+      }
     }
-    return [...new Set(ids)]
+    return [...ids]
       .map((id) => byId.get(id))
       .filter(Boolean)
       .sort((left, right) => activityCount(right.activity) - activityCount(left.activity));

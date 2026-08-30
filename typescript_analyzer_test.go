@@ -36,6 +36,32 @@ func TestTypeScriptAnalyzerConnectsDirectRelativeImports(t *testing.T) {
 	assertGraphHasEdge(t, graph, "src/screens/DiscoverScreen.tsx", "src/components/SearchField.tsx", EdgeKindImports)
 }
 
+func TestTypeScriptAnalyzerConnectsSvelteComponentImports(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "src/CodeCard.svelte", "<script>export let name = 'Card';</script>\n<div>{name}</div>\n")
+	writeTestFile(t, root, "src/App.svelte", "<script>import CodeCard from './CodeCard.svelte';</script>\n<CodeCard name='demo' />\n")
+
+	graph, err := analyzeRepositoryGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertGraphHasEdge(t, graph, "src/App.svelte", "src/CodeCard.svelte", EdgeKindImports)
+}
+
+func TestTypeScriptAnalyzerConnectsJavaScriptAndJSXImports(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "src/button.js", "export default function Button() { return 'button'; }\n")
+	writeTestFile(t, root, "src/App.jsx", "import Button from './button';\nexport default function App() { return <Button />; }\n")
+
+	graph, err := analyzeRepositoryGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertGraphHasEdge(t, graph, "src/App.jsx", "src/button.js", EdgeKindImports)
+}
+
 func writeTestFile(t *testing.T, root, relativePath, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))

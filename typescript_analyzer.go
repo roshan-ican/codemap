@@ -172,7 +172,7 @@ func (analyzer *TypeScriptAnalyzer) addNamedExport(module NodeID, name string, t
 }
 
 func isTypeScriptLikeLanguage(language string) bool {
-	return language == "TypeScript" || language == "JavaScript"
+	return language == "TypeScript" || language == "JavaScript" || language == "Svelte"
 }
 
 func registerTypeScriptModulePath(modules map[string]NodeID, nodeID NodeID) {
