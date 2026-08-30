@@ -1,12 +1,13 @@
 <script>
   import { onMount } from 'svelte';
-  import { Background, BackgroundVariant, Controls, SelectionMode, SvelteFlow } from '@xyflow/svelte';
+  import { Background, BackgroundVariant, Controls, SvelteFlow } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import CodeCard from './CodeCard.svelte';
 
   let nodes = [];
   let edges = [];
   const nodeTypes = { code: CodeCard };
+  let mapShell = null;
 
   let graph = null;
   let selectedId = '';
@@ -23,6 +24,8 @@
   let testsPulledOut = false;
   let aiContext = null;
   let aiContextLoading = false;
+  let marquee = null;
+  let marqueeStart = null;
   let activityLog = [];
   const viewOptions = [
     { id: 'calls', label: 'What calls what' },
@@ -31,7 +34,7 @@
   ];
   const toolOptions = [
     { id: 'pan', label: 'Pan' },
-    { id: 'select', label: 'Select' }
+    { id: 'select', label: 'Area select' }
   ];
   const periodOptions = [
     { id: '30', label: '30d' },
@@ -581,6 +584,93 @@
     renderGraph();
   }
 
+  function handleMarqueePointerDown(event) {
+    if (mapTool !== 'select' || event.button !== 0 || !mapShell || shouldSkipMarquee(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const point = mapShellPoint(event);
+    marqueeStart = { x: point.x, y: point.y, clientX: event.clientX, clientY: event.clientY };
+    marquee = { left: point.x, top: point.y, width: 0, height: 0 };
+    window.addEventListener('pointermove', handleMarqueePointerMove, { capture: true });
+    window.addEventListener('pointerup', handleMarqueePointerUp, { capture: true, once: true });
+  }
+
+  function handleMarqueePointerMove(event) {
+    if (!marqueeStart) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    updateMarquee(event);
+  }
+
+  function handleMarqueePointerUp(event) {
+    if (!marqueeStart) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    updateMarquee(event);
+    selectNodesInMarquee(event);
+    clearMarqueeListeners();
+    marqueeStart = null;
+    marquee = null;
+  }
+
+  function updateMarquee(event) {
+    const point = mapShellPoint(event);
+    marquee = {
+      left: Math.min(marqueeStart.x, point.x),
+      top: Math.min(marqueeStart.y, point.y),
+      width: Math.abs(point.x - marqueeStart.x),
+      height: Math.abs(point.y - marqueeStart.y)
+    };
+  }
+
+  function selectNodesInMarquee(event) {
+    const moved = Math.hypot(event.clientX - marqueeStart.clientX, event.clientY - marqueeStart.clientY);
+    const rect = {
+      left: Math.min(marqueeStart.clientX, event.clientX),
+      right: Math.max(marqueeStart.clientX, event.clientX),
+      top: Math.min(marqueeStart.clientY, event.clientY),
+      bottom: Math.max(marqueeStart.clientY, event.clientY)
+    };
+    const ids = moved < 4 ? nodeIdAtPoint(event.clientX, event.clientY) : nodeIdsInRect(rect);
+    selectedIds = Array.isArray(ids) ? ids : ids ? [ids] : [];
+    selectedId = selectedIds.at(-1) ?? '';
+    aiContext = null;
+    if (selectedIds.length > 0) inspectorOpen = true;
+    syncSelectionStyles();
+  }
+
+  function nodeIdsInRect(rect) {
+    return [...mapShell.querySelectorAll('.svelte-flow__node[data-id]')]
+      .filter((element) => !element.dataset.id?.startsWith('__') && rectsIntersect(rect, element.getBoundingClientRect()))
+      .map((element) => element.dataset.id)
+      .filter(Boolean);
+  }
+
+  function nodeIdAtPoint(clientX, clientY) {
+    const element = document
+      .elementsFromPoint(clientX, clientY)
+      .find((item) => item.classList?.contains('svelte-flow__node') && !item.dataset.id?.startsWith('__'));
+    return element?.dataset.id ?? '';
+  }
+
+  function rectsIntersect(a, b) {
+    return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+  }
+
+  function mapShellPoint(event) {
+    const bounds = mapShell.getBoundingClientRect();
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+
+  function shouldSkipMarquee(target) {
+    return Boolean(target?.closest?.('.svelte-flow__controls, .map-legend'));
+  }
+
+  function clearMarqueeListeners() {
+    window.removeEventListener('pointermove', handleMarqueePointerMove, { capture: true });
+    window.removeEventListener('pointerup', handleMarqueePointerUp, { capture: true });
+  }
+
   function handleSelectionChange({ nodes: selectedNodes }) {
     const nextIds = selectedNodes.map((node) => node.id);
     if (nextIds.join('\0') === selectedIds.join('\0')) return;
@@ -593,6 +683,7 @@
 
   onMount(() => {
     loadGraph();
+    mapShell?.addEventListener('pointerdown', handleMarqueePointerDown, { capture: true });
     const events = new EventSource('/events');
     events.addEventListener('ready', () => {
       connected = true;
@@ -610,7 +701,11 @@
       addActivity(`Analysis error: ${payload.error}`);
     });
     events.onerror = () => connected = false;
-    return () => events.close();
+    return () => {
+      events.close();
+      mapShell?.removeEventListener('pointerdown', handleMarqueePointerDown, { capture: true });
+      clearMarqueeListeners();
+    };
   });
 </script>
 
@@ -671,7 +766,7 @@
 
       {#if notice}<div class="notice" role="status">{notice}</div>{/if}
 
-      <section class="map-shell" class:select-mode={mapTool === 'select'} aria-label="Repository code map">
+      <section bind:this={mapShell} class="map-shell" class:select-mode={mapTool === 'select'} aria-label="Repository code map">
         <div class="map-legend" aria-label="Connection colors">
           <span><i class="frontend"></i>frontend</span>
           <span><i class="backend"></i>backend</span>
@@ -684,6 +779,9 @@
         {:else if nodes.length === 0}
           <div class="loading">No supported source files found.</div>
         {:else}
+          {#if marquee}
+            <div class="marquee" style={`left: ${marquee.left}px; top: ${marquee.top}px; width: ${marquee.width}px; height: ${marquee.height}px`}></div>
+          {/if}
           <SvelteFlow
             bind:nodes
             bind:edges
@@ -696,8 +794,8 @@
             onnodecontextmenu={handleNodeContextMenu}
             onselectionchange={handleSelectionChange}
             panOnDrag={mapTool === 'pan'}
-            selectionOnDrag={mapTool === 'select'}
-            selectionMode={SelectionMode.Partial}
+            selectionOnDrag={false}
+            nodesDraggable={mapTool === 'pan'}
             nodesConnectable={false}
             deleteKey={null}
             proOptions={{ hideAttribution: true }}
@@ -871,6 +969,7 @@
   .notice { position: absolute; left: 16px; top: 58px; z-index: 8; max-width: min(520px, calc(100% - 32px)); padding: 8px 10px; border: 1px solid #26394d; border-radius: 8px; color: #c7d6e4; background: rgba(9, 15, 23, 0.94); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26); font-size: 0.78rem; pointer-events: none; }
   .map-shell { position: relative; min-height: 0; background: radial-gradient(circle at 1px 1px, #132130 1px, transparent 0) 0 0 / 36px 36px, #0b1119; overflow: hidden; }
   .map-shell.select-mode { cursor: crosshair; }
+  .marquee { position: absolute; z-index: 7; border: 1px dashed #8aa2ff; border-radius: 4px; background: rgba(91, 112, 255, 0.12); box-shadow: 0 0 0 1px rgba(138, 162, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.08); pointer-events: none; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: #708898; z-index: 2; }
   .map-legend { position: absolute; left: 16px; top: 16px; z-index: 4; gap: 12px; padding: 8px 10px; border: 1px solid #17283a; border-radius: 8px; color: #76889b; background: rgba(8, 14, 21, 0.84); font-size: 0.72rem; pointer-events: none; }
   .map-legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
