@@ -1,5 +1,7 @@
 # codemap
 
+Repository: https://github.com/roshan-ican/codemap
+
 `codemap` is a local browser map for Git repositories. It scans source files,
 detects code connections, shows current or branch-level changes, and opens files
 in VS Code from the map.
