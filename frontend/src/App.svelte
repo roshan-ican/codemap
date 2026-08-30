@@ -446,7 +446,7 @@
       });
       if (!response.ok) throw new Error((await response.text()).trim() || 'Could not build context');
       aiContext = await response.json();
-      notice = aiContext.truncated ? 'AI context ready; large files were truncated' : 'AI context ready';
+      notice = '';
     } catch (error) {
       notice = error instanceof Error ? error.message : String(error);
     } finally {
@@ -458,7 +458,7 @@
     if (!aiContext?.prompt) return;
     try {
       await navigator.clipboard.writeText(aiContext.prompt);
-      notice = 'Copied AI context';
+      notice = '';
     } catch (error) {
       notice = error instanceof Error ? error.message : String(error);
     }
