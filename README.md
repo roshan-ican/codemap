@@ -164,7 +164,16 @@ make build
 
 ## Contributing
 
-Contributions are welcome. Good first areas:
+Contributions are welcome! If you would like to contribute to this project,
+please follow these steps:
+
+1. Fork the repository.
+2. Create a new branch for your feature or bug fix.
+3. Make the necessary changes and commit them.
+4. Push your changes to your fork.
+5. Submit a pull request describing your changes.
+
+Good first areas:
 
 - Improve language analyzers.
 - Add support for more file types.
@@ -172,15 +181,6 @@ Contributions are welcome. Good first areas:
 - Add more useful AI context sections.
 - Improve tests and fixtures.
 - Add packaging, releases, or Homebrew support.
-
-Recommended workflow:
-
-```bash
-git clone https://github.com/roshan-ican/codemap.git
-cd codemap
-git checkout -b your-feature-name
-npm install --prefix frontend
-```
 
 Before opening a pull request:
 
