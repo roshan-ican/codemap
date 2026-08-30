@@ -35,8 +35,10 @@
   const scopeOptions = [
     { id: 'all', label: 'All' },
     { id: 'frontend', label: 'Frontend' },
-    { id: 'backend', label: 'Backend' }
+    { id: 'backend', label: 'Backend' },
+    { id: 'tests', label: 'Tests' }
   ];
+  const categoryOrder = ['frontend', 'backend', 'tests'];
 
   $: selected = nodes.find((node) => node.id === selectedId)?.data ?? graph?.nodes.find((node) => node.id === selectedId);
   $: selectedCards = selectedIds
@@ -130,7 +132,7 @@
     const scopedEdges = apiEdges.filter((edge) => scopedIds.has(edge.from) && scopedIds.has(edge.to));
     const resultNodes = [...scopedNodes];
     const resultEdges = [...scopedEdges];
-    const categories = [...new Set(scopedNodes.map(nodeArea))].sort();
+    const categories = [...new Set(scopedNodes.map(nodeArea))].sort((left, right) => categoryRank(left) - categoryRank(right));
 
     for (const category of categories) {
       const parent = categoryNode(category);
@@ -155,6 +157,7 @@
   function nodeArea(node) {
     const id = String(node.id ?? '').toLowerCase();
     const language = String(node.language ?? '').toLowerCase();
+    if (isTestFile(id)) return 'tests';
     if (
       id.startsWith('frontend/') ||
       ['svelte', 'javascript', 'typescript', 'css', 'html', 'vue'].includes(language)
@@ -164,17 +167,49 @@
     return 'backend';
   }
 
+  function isTestFile(id) {
+    const normalized = id.replaceAll('\\', '/');
+    return (
+      normalized.endsWith('_test.go') ||
+      /\.(test|spec)\.[^.]+$/.test(normalized) ||
+      /(^|\/)(__tests__|tests?|specs?)(\/|$)/.test(normalized)
+    );
+  }
+
+  function categoryRank(category) {
+    const index = categoryOrder.indexOf(category);
+    return index === -1 ? categoryOrder.length : index;
+  }
+
   function categoryNode(category) {
-    const frontend = category === 'frontend';
     const childCount = scopedSourceNodes(graph?.nodes ?? []).filter((node) => nodeArea(node) === category).length;
+    const details = {
+      frontend: {
+        id: '__frontend__',
+        label: 'Frontend',
+        description: `${childCount} client-side source files and UI entry points.`
+      },
+      backend: {
+        id: '__backend__',
+        label: 'Backend',
+        description: `${childCount} server-side source files and analysis/map logic.`
+      },
+      tests: {
+        id: '__tests__',
+        label: 'Tests',
+        description: `${childCount} test files and validation entry points.`
+      }
+    }[category] ?? {
+      id: `__${category}__`,
+      label: category,
+      description: `${childCount} source files.`
+    };
     return {
-      id: frontend ? '__frontend__' : '__backend__',
-      label: frontend ? 'Frontend' : 'Backend',
+      id: details.id,
+      label: details.label,
       language: 'Scope',
       kind: 'folder',
-      description: frontend
-        ? `${childCount} client-side source files and UI entry points.`
-        : `${childCount} server-side source files and analysis/map logic.`,
+      description: details.description,
       isRoot: true,
       openable: false,
       area: category,
@@ -188,6 +223,11 @@
     const incoming = new Set(apiEdges.filter((edge) => categoryIds.has(edge.from) && categoryIds.has(edge.to)).map((edge) => edge.to));
     const roots = categoryNodes.filter((node) => node.isRoot || !incoming.has(node.id));
     return (roots.length ? roots : categoryNodes.slice(0, 4)).slice(0, 6);
+  }
+
+  function scopeNodeY(id) {
+    const category = String(id).replace(/^__|__$/g, '');
+    return Math.max(0, categoryRank(category)) * 150;
   }
 
   function layoutNodes(apiNodes, apiEdges) {
@@ -240,7 +280,7 @@
           selected: selectedSet.has(node.id),
           position: previousPositions.get(node.id) ?? {
             x: isScopeNode ? 0 : (depth + 1) * horizontalGap,
-            y: isScopeNode ? (node.id === '__frontend__' ? 0 : 150) : index * verticalGap
+            y: isScopeNode ? scopeNodeY(node.id) : index * verticalGap
           },
           ariaLabel: `${node.label}: ${node.description}`
         });

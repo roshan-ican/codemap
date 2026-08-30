@@ -32,10 +32,12 @@
   article.root { border-color: #25566b; }
   article.scope { width: 250px; min-height: 118px; border-color: #2b6a80; background: #0b1a25; }
   article.scope[data-area='backend'] { border-color: #9f6828; background: #1a1510; }
+  article.scope[data-area='tests'] { border-color: #6f5ca8; background: #151422; }
   article.scope h3 { font-size: 1.08rem; }
   article.scope .topline em, article.scope .diff { display: none; }
   article.scope .rail span { width: 100% !important; background: #45bfe3; }
   article.scope[data-area='backend'] .rail span { background: #d6933b; }
+  article.scope[data-area='tests'] .rail span { background: #a78bfa; }
   article.changed { border-color: #a7672a; background: #15181a; }
   article.affected { border-style: dashed; opacity: 0.78; }
   article[data-status='A'] { border-color: #2f8f66; }
