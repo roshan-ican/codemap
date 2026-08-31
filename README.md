@@ -9,6 +9,12 @@ in VS Code from the map.
 It is built as a standalone command so you can install it once and run it inside
 any Git project.
 
+## Demo
+
+<video src="./assets/final-code-map.mov" controls muted width="100%"></video>
+
+[Watch the demo video](./assets/final-code-map.mov).
+
 ## Features
 
 - Live local code map for the current Git repository.
