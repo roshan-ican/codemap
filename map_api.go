@@ -123,6 +123,9 @@ type openTarget struct {
 type mapSnapshot struct {
 	Response    mapResponse
 	OpenTargets map[NodeID]openTarget
+	// Diffs holds capped diff text for analyzed changed files. It stays on the
+	// server and is never part of the /api/graph response.
+	Diffs map[NodeID]string
 }
 
 type lineRange struct {
@@ -136,7 +139,14 @@ type fileDiffFacts struct {
 	FirstChangedLine int
 	OldRanges        []lineRange
 	NewRanges        []lineRange
+	Text             string
+	Truncated        bool
 }
+
+const (
+	maxDiffTextBytes   = 16000
+	diffTruncationNote = "[diff truncated]\n"
+)
 
 type changeEvidence struct {
 	Response          mapChangeResponse
@@ -173,6 +183,7 @@ func buildMapSnapshot(root string, repo *git.Repository, worktree *git.Worktree,
 
 	changeByID := make(map[NodeID]reviewChange, len(changes))
 	changeFacts := make(map[NodeID]changeEvidence, len(changes))
+	diffs := make(map[NodeID]string, len(changes))
 	openTargets := make(map[NodeID]openTarget, len(graph.Nodes)+len(changes))
 
 	for _, change := range changes {
@@ -207,6 +218,7 @@ func buildMapSnapshot(root string, repo *git.Repository, worktree *git.Worktree,
 			CurrentLineCount:  contentLineCount(newContent),
 		}
 		changeFacts[id] = facts
+		diffs[id] = diff.Text
 		openTargets[id] = openTarget{
 			Path:     absolutePath,
 			Line:     facts.Response.FirstChangedLine,
@@ -347,6 +359,7 @@ func buildMapSnapshot(root string, repo *git.Repository, worktree *git.Worktree,
 			Activity:     readMapActivityBuckets(repo, generatedAt, 24),
 		},
 		OpenTargets: openTargets,
+		Diffs:       diffs,
 	}, nil
 }
 
@@ -595,9 +608,29 @@ func diffFileLines(oldContent, newContent string) fileDiffFacts {
 	diffs = matcher.DiffCharsToLines(diffs, lines)
 
 	result := fileDiffFacts{}
+	text := &strings.Builder{}
 	oldLine, newLine := 1, 1
+	inHunk := false
 	for _, diff := range diffs {
 		count := countDiffLines(diff.Text)
+		if diff.Type == diffmatchpatch.DiffEqual {
+			inHunk = false
+		} else if !result.Truncated {
+			if !inHunk {
+				result.Truncated = !appendDiffText(text, fmt.Sprintf("@@ -%d +%d @@\n", oldLine, newLine))
+				inHunk = true
+			}
+			prefix := "+"
+			if diff.Type == diffmatchpatch.DiffDelete {
+				prefix = "-"
+			}
+			for _, line := range strings.SplitAfter(strings.TrimSuffix(diff.Text, "\n"), "\n") {
+				if result.Truncated || !appendDiffText(text, prefix+strings.TrimSuffix(line, "\n")+"\n") {
+					result.Truncated = true
+					break
+				}
+			}
+		}
 		switch diff.Type {
 		case diffmatchpatch.DiffEqual:
 			oldLine += count
@@ -618,7 +651,20 @@ func diffFileLines(oldContent, newContent string) fileDiffFacts {
 			newLine += count
 		}
 	}
+	result.Text = text.String()
+	if result.Truncated {
+		result.Text += diffTruncationNote
+	}
 	return result
+}
+
+// appendDiffText adds line to builder unless it would exceed maxDiffTextBytes.
+func appendDiffText(builder *strings.Builder, line string) bool {
+	if builder.Len()+len(line) > maxDiffTextBytes {
+		return false
+	}
+	builder.WriteString(line)
+	return true
 }
 
 func countDiffLines(text string) int {

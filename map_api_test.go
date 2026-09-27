@@ -20,6 +20,32 @@ func TestDiffFileLinesReportsCountsAndFirstNewLine(t *testing.T) {
 	if got.Additions != 2 || got.Deletions != 1 || got.FirstChangedLine != 5 {
 		t.Fatalf("diff facts = %#v, want +2 -1 starting on line 5", got)
 	}
+	want := "@@ -5 +5 @@\n-\tprintln(1)\n+\tprintln(2)\n+\tprintln(3)\n"
+	if got.Text != want || got.Truncated {
+		t.Fatalf("diff text = %q (truncated %v), want %q", got.Text, got.Truncated, want)
+	}
+}
+
+func TestDiffFileLinesTextSeparatesHunksAndHandlesMissingNewline(t *testing.T) {
+	got := diffFileLines("a\nb\nc\nd", "A\nb\nc\nD")
+	want := "@@ -1 +1 @@\n-a\n+A\n@@ -4 +4 @@\n-d\n+D\n"
+	if got.Text != want {
+		t.Fatalf("diff text = %q, want %q", got.Text, want)
+	}
+}
+
+func TestDiffFileLinesTextIsCapped(t *testing.T) {
+	newContent := strings.Repeat("0123456789abcdef0123456789abcdef\n", 2000)
+	got := diffFileLines("", newContent)
+	if !got.Truncated || !strings.HasSuffix(got.Text, diffTruncationNote) {
+		t.Fatalf("large diff was not marked truncated: truncated=%v", got.Truncated)
+	}
+	if len(got.Text) > maxDiffTextBytes+len(diffTruncationNote) {
+		t.Fatalf("diff text length = %d, want <= %d", len(got.Text), maxDiffTextBytes+len(diffTruncationNote))
+	}
+	if got.Additions != 2000 {
+		t.Fatalf("additions = %d, want 2000 even when text is truncated", got.Additions)
+	}
 }
 
 func TestTouchedGoSymbolsUsesOldAndNewDeclarations(t *testing.T) {
@@ -207,6 +233,9 @@ func TestBuildMapSnapshotIncludesChangeSummary(t *testing.T) {
 	}
 	if len(snapshot.Response.Activity) != 24 {
 		t.Fatalf("repository activity buckets = %d, want 24", len(snapshot.Response.Activity))
+	}
+	if want := "@@ -4 +4 @@\n-\tprintln(1)\n+\tprintln(2)\n+\tprintln(3)\n"; snapshot.Diffs["app.go"] != want {
+		t.Fatalf("snapshot diff = %q, want %q", snapshot.Diffs["app.go"], want)
 	}
 }
 
