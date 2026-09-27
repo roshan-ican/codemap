@@ -11,6 +11,12 @@ any Git project.
 
 ## Demo
 
+**IBM Bob hackathon demo:** [Watch on Tella](https://www.tella.tv/video/codemap-understand-code-git-changes-297a):
+Bob-powered change impact analysis and flow explanations in codemap.
+Evidence of IBM Bob usage is in [`bob_sessions/`](bob_sessions/README.md).
+
+Original codemap demo:
+
 <video src="./assets/final-code-map.mov" controls muted width="100%"></video>
 
 [Watch the demo video](./assets/final-code-map.mov).

@@ -5,6 +5,11 @@ PLATFORMS=linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 frontend:
 	cd frontend && npm ci && npm run build
 
+# Build the UI, load BOB_API_KEY from .env if present, and start the server.
+dev:
+	npm run build --prefix frontend
+	@if [ -f .env ]; then . ./.env; fi; go run .
+
 build: frontend
 	mkdir -p $(OUTPUT_DIR)
 	@for platform in $(PLATFORMS); do \
@@ -19,4 +24,4 @@ build: frontend
 clean:
 	rm -rf $(OUTPUT_DIR)/*
 
-.PHONY: frontend build clean
+.PHONY: frontend dev build clean
