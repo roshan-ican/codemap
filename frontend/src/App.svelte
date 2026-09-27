@@ -24,6 +24,14 @@
   let testsPulledOut = false;
   let aiContext = null;
   let aiContextLoading = false;
+  let explainResult = null;
+  let explainLoading = false;
+  let explainError = '';
+  let explainCached = false;
+  let impactCached = false;
+  let impactResult = null;
+  let impactLoading = false;
+  let impactError = '';
   let marquee = null;
   let marqueeStart = null;
   let activityLog = [];
@@ -356,6 +364,10 @@
     selectedId = '';
     selectedIds = [];
     aiContext = null;
+    impactResult = null;
+    impactError = '';
+    explainResult = null;
+    explainError = '';
     renderGraph();
   }
 
@@ -583,6 +595,38 @@
     }
   }
 
+  function bobErrorMessage(status, text, action) {
+    if (status === 503) return 'Bob Shell is not available. Install it and restart codemap from a terminal where bob is on PATH.';
+    if (status === 401) return 'Sign in to Bob Shell (or set BOB_API_KEY) and try again.';
+    if (status === 504) return `Bob took too long on the ${action}. Try a smaller selection.`;
+    return text || `The ${action} failed (${status}).`;
+  }
+
+  async function explainSelection() {
+    const ids = selectedContextIds();
+    if (ids.length === 0) return;
+    explainResult = null;
+    explainError = '';
+    explainLoading = true;
+    try {
+      const response = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      if (!response.ok) {
+        explainError = bobErrorMessage(response.status, (await response.text()).trim(), 'flow explanation');
+        return;
+      }
+      explainCached = response.headers.get('X-Codemap-Bob-Cache') === 'hit';
+      explainResult = await response.json();
+    } catch (error) {
+      explainError = error instanceof Error ? error.message : String(error);
+    } finally {
+      explainLoading = false;
+    }
+  }
+
   async function copyAIContext() {
     if (!aiContext?.prompt) return;
     try {
@@ -590,6 +634,38 @@
       notice = '';
     } catch (error) {
       notice = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function analyzeImpact() {
+    if (!selectedId) return;
+    impactResult = null;
+    impactError = '';
+    explainResult = null;
+    explainError = '';
+    impactLoading = true;
+    try {
+      const response = await fetch('/api/impact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId })
+      });
+      if (!response.ok) {
+        const status = response.status;
+        const text = (await response.text()).trim();
+        if (status === 503) impactError = 'Bob Shell is not installed. Install it to use impact analysis.';
+        else if (status === 401) impactError = 'Sign in to Bob Shell to use impact analysis.';
+        else if (status === 504) impactError = 'Impact analysis timed out. Try again.';
+        else if (status === 502) impactError = `Bob could not complete the analysis: ${text}`;
+        else impactError = text || `Impact analysis failed (${status}).`;
+        return;
+      }
+      impactCached = response.headers.get('X-Codemap-Bob-Cache') === 'hit';
+      impactResult = await response.json();
+    } catch (error) {
+      impactError = error instanceof Error ? error.message : String(error);
+    } finally {
+      impactLoading = false;
     }
   }
 
@@ -605,6 +681,10 @@
       selectedIds = [node.id];
     }
     aiContext = null;
+    impactResult = null;
+    impactError = '';
+    explainResult = null;
+    explainError = '';
     inspectorOpen = true;
     syncSelectionStyles();
     if ('detail' in event && event.detail >= 2) openNode(node.id);
@@ -643,8 +723,17 @@
     updateMarquee(event);
     selectNodesInMarquee(event);
     clearMarqueeListeners();
+    // The browser still fires a click after the drag; the flow pane would treat
+    // it as a background click and clear the selection we just made.
+    window.addEventListener('click', swallowClick, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallowClick, { capture: true }), 0);
     marqueeStart = null;
     marquee = null;
+  }
+
+  function swallowClick(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
   }
 
   function updateMarquee(event) {
@@ -669,6 +758,10 @@
     selectedIds = Array.isArray(ids) ? ids : ids ? [ids] : [];
     selectedId = selectedIds.at(-1) ?? '';
     aiContext = null;
+    impactResult = null;
+    impactError = '';
+    explainResult = null;
+    explainError = '';
     if (selectedIds.length > 0) inspectorOpen = true;
     syncSelectionStyles();
   }
@@ -711,6 +804,10 @@
     selectedIds = nextIds;
     selectedId = selectedIds.includes(selectedId) ? selectedId : selectedIds.at(-1) ?? '';
     aiContext = null;
+    impactResult = null;
+    impactError = '';
+    explainResult = null;
+    explainError = '';
     if (selectedIds.length > 0) inspectorOpen = true;
     syncSelectionStyles();
   }
@@ -886,6 +983,33 @@
           <button onclick={buildAIContext} disabled={aiContextLoading}>{aiContextLoading ? 'Building context...' : 'Understand selection'}</button>
           <button onclick={copyAIContext} disabled={!aiContext?.prompt}>Copy AI context</button>
         </div>
+        <button class="explain-button" onclick={explainSelection} disabled={explainLoading}>
+          <span class="explain-spark" aria-hidden="true">✦</span>
+          {explainLoading ? `Bob is reading ${selectedCards.length} files…` : 'Explain the flow with Bob'}
+        </button>
+        {#if explainLoading}
+          <div class="explain-loading" aria-hidden="true"><span></span><span></span><span></span></div>
+        {/if}
+        {#if explainError}
+          <div class="impact-error" role="alert">{explainError}</div>
+        {/if}
+        {#if explainResult}
+          <section class="explain-panel" aria-label="Bob's explanation">
+            <header>
+              <span class="explain-badge">IBM Bob{explainCached ? ' · ⚡ instant (cached)' : ''}</span>
+              <strong>How these {selectedCards.length} files work together</strong>
+            </header>
+            <p class="explain-summary">{explainResult.summary}</p>
+            {#if explainResult.flow?.length}
+              <ol class="explain-flow">
+                {#each explainResult.flow as step, index}
+                  <li><span class="explain-step">{index + 1}</span><p>{step}</p></li>
+                {/each}
+              </ol>
+            {/if}
+            <footer>Grounded in codemap's selection context · verify against the source</footer>
+          </section>
+        {/if}
         <div class="selection-list">
           {#each selectedCards as item}
             <button onclick={() => { selectedId = item.id; selectedIds = [item.id]; aiContext = null; syncSelectionStyles(); }}>
@@ -937,6 +1061,11 @@
             <span>+{selected.change.additions} / -{selected.change.deletions}</span>
             <span>first change: line {selected.change.firstChangedLine}</span>
           </div>
+          <div class="impact-actions">
+            <button onclick={analyzeImpact} disabled={impactLoading}>
+              {impactLoading ? 'Analyzing with Bob…' : 'Analyze impact with Bob'}
+            </button>
+          </div>
         {/if}
 
         <h3>Recent commits</h3>
@@ -967,6 +1096,71 @@
         <div class="ai-context">
           <div><strong>{aiContext.title}</strong><span>{aiContext.fileCount} files{aiContext.truncated ? ' · truncated' : ''}</span></div>
           <pre>{aiContext.prompt}</pre>
+        </div>
+      {/if}
+
+      {#if impactError}
+        <div class="impact-error" role="alert">{impactError}</div>
+      {/if}
+
+      {#if impactResult}
+        {@const ic = impactResult.context}
+        {@const ia = impactResult.analysis}
+        <h3>Impact analysis{#if impactCached}<span class="cache-badge">⚡ instant · cached</span>{/if}</h3>
+        <div class="impact-panel">
+          <div class="impact-summary">
+            <strong>Summary</strong>
+            <p>{ia.summary}</p>
+          </div>
+
+          {#if ia.affectedAreas?.length}
+            <div class="impact-section">
+              <strong>Affected areas</strong>
+              <ul>
+                {#each ia.affectedAreas as area}<li>{area}</li>{/each}
+              </ul>
+            </div>
+          {/if}
+
+          {#if ia.reasoning?.length}
+            <div class="impact-section">
+              <strong>Reasoning</strong>
+              <ul>
+                {#each ia.reasoning as reason}<li>{reason}</li>{/each}
+              </ul>
+            </div>
+          {/if}
+
+          {#if ia.relevantTests?.length}
+            <div class="impact-section">
+              <strong>Relevant tests</strong>
+              <ul>
+                {#each ia.relevantTests as test}<li><code>{test}</code></li>{/each}
+              </ul>
+            </div>
+          {/if}
+
+          <div class="impact-evidence">
+            <strong>Codemap evidence</strong>
+            <div class="impact-evidence-row">
+              <span>Callers</span>
+              <div class="chips">
+                {#each ic.callers as id}<span>{id}</span>{:else}<span class="none">none</span>{/each}
+              </div>
+            </div>
+            <div class="impact-evidence-row">
+              <span>Dependencies</span>
+              <div class="chips">
+                {#each ic.dependencies as id}<span>{id}</span>{:else}<span class="none">none</span>{/each}
+              </div>
+            </div>
+            <div class="impact-evidence-row">
+              <span>Related tests</span>
+              <div class="chips">
+                {#each ic.relatedTests as id}<span>{id}</span>{:else}<span class="none">none</span>{/each}
+              </div>
+            </div>
+          </div>
         </div>
       {/if}
     </aside>
@@ -1043,6 +1237,28 @@
   .ai-actions button { min-width: 0; border: 1px solid #1d3143; border-radius: 8px; padding: 9px 10px; color: #dce7ef; background: #102033; font-size: 0.76rem; font-weight: 800; cursor: pointer; }
   .ai-actions button:first-child { color: #061018; border-color: #6ee7f9; background: #67e8f9; }
   .ai-actions button:hover:not(:disabled) { filter: brightness(1.08); }
+  .cache-badge { margin-left: 8px; padding: 2px 7px; border-radius: 999px; color: #0b2a1c; background: #6ee7b7; font: 800 0.58rem ui-monospace, Consolas, monospace; letter-spacing: 0.06em; vertical-align: middle; }
+  .explain-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: -4px 0 14px; border: 1px solid #6d5bd0; border-radius: 8px; padding: 10px 12px; color: #efeaff; background: linear-gradient(135deg, #2a1f5c, #173a55); font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: filter 0.15s, transform 0.15s; }
+  .explain-button:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+  .explain-button:disabled { cursor: progress; opacity: 0.85; }
+  .explain-spark { color: #c4b5fd; }
+  .explain-loading { display: flex; justify-content: center; gap: 6px; margin: -6px 0 14px; }
+  .explain-loading span { width: 6px; height: 6px; border-radius: 50%; background: #a78bfa; animation: explain-pulse 1s infinite ease-in-out; }
+  .explain-loading span:nth-child(2) { animation-delay: 0.15s; }
+  .explain-loading span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes explain-pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
+  .explain-panel { display: grid; gap: 12px; margin: 0 0 16px; padding: 14px; border: 1px solid #3b2f7a; border-radius: 10px; background: linear-gradient(180deg, #120f26, #0b141e); }
+  .explain-panel header { display: grid; gap: 6px; }
+  .explain-panel header strong { color: #e5eef7; font-size: 0.82rem; line-height: 1.35; }
+  .explain-badge { justify-self: start; padding: 2px 8px; border-radius: 999px; color: #1b1240; background: #c4b5fd; font: 800 0.6rem ui-monospace, Consolas, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+  .explain-summary { margin: 0; color: #cbd6e2; font-size: 0.8rem; line-height: 1.55; }
+  .explain-flow { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .explain-flow li { position: relative; display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding-bottom: 12px; }
+  .explain-flow li:not(:last-child)::before { content: ''; position: absolute; left: 10px; top: 22px; bottom: 0; width: 2px; background: #2e2660; }
+  .explain-flow li:last-child { padding-bottom: 0; }
+  .explain-step { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #efeaff; background: #4c3fa3; font: 800 0.66rem ui-monospace, Consolas, monospace; }
+  .explain-flow p { margin: 2px 0 0; color: #a8b9ca; font-size: 0.76rem; line-height: 1.45; }
+  .explain-panel footer { color: #5f6f82; font: 0.62rem ui-monospace, Consolas, monospace; }
   .ai-context { display: grid; gap: 10px; padding: 11px; border: 1px solid #1d3143; border-radius: 8px; background: #0b141e; }
   .ai-context div { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
   .ai-context strong { min-width: 0; color: #e5eef7; font-size: 0.8rem; overflow-wrap: anywhere; }
@@ -1122,4 +1338,23 @@
     .stat-grid { grid-template-columns: 1fr; }
     .stat-grid div { border-right: 0; border-bottom: 1px solid #172332; }
   }
+  .impact-actions { margin-top: 14px; }
+  .impact-actions button { width: 100%; border: 1px solid #2a5a6e; border-radius: 8px; padding: 9px 12px; color: #dce7ef; background: #0e2535; font-size: 0.76rem; font-weight: 800; cursor: pointer; }
+  .impact-actions button:hover:not(:disabled) { filter: brightness(1.1); }
+  .impact-error { margin: 16px 0; padding: 10px 12px; border: 1px solid #4a2028; border-radius: 8px; color: #f4a0a8; background: #1a0d10; font-size: 0.76rem; line-height: 1.4; }
+  .impact-panel { display: grid; gap: 12px; padding: 12px; border: 1px solid #1d3143; border-radius: 8px; background: #0b141e; }
+  .impact-summary { display: grid; gap: 5px; }
+  .impact-summary strong { color: #dce7ef; font-size: 0.72rem; }
+  .impact-summary p { margin: 0; color: #a8b9ca; font-size: 0.78rem; line-height: 1.45; }
+  .impact-section { display: grid; gap: 5px; }
+  .impact-section strong { color: #dce7ef; font-size: 0.72rem; }
+  .impact-section ul { margin: 0; padding-left: 1.2em; display: grid; gap: 3px; }
+  .impact-section li { color: #8ea3b5; font-size: 0.76rem; line-height: 1.4; }
+  .impact-section code { color: #67afc7; font: 0.7rem ui-monospace, Consolas, monospace; }
+  .impact-evidence { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid #172637; }
+  .impact-evidence > strong { color: #65768a; font: 800 0.62rem ui-monospace, Consolas, monospace; letter-spacing: 0.14em; text-transform: uppercase; }
+  .impact-evidence-row { display: grid; gap: 5px; }
+  .impact-evidence-row > span { color: #65768a; font: 800 0.62rem ui-monospace, Consolas, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
+  .impact-evidence-row .chips { gap: 4px; }
+  .none { color: #4a5a6a; font-style: italic; font-size: 0.72rem; }
 </style>
