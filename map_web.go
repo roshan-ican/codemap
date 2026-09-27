@@ -32,11 +32,14 @@ type mapEvent struct {
 }
 
 type mapWebServer struct {
-	root     string
-	repo     *git.Repository
-	worktree *git.Worktree
-	opener   func(string, int) error
-	options  mapOptions
+	root      string
+	repo      *git.Repository
+	worktree  *git.Worktree
+	opener    func(string, int) error
+	options   mapOptions
+	analyzer  ImpactAnalyzer // nil when bob is not installed
+	explainer FlowExplainer  // nil when bob is not installed
+	bobCache  *bobCache      // nil when bob is not installed
 
 	mu          sync.RWMutex
 	snapshot    mapSnapshot
@@ -117,12 +120,27 @@ func newMapWebServer(
 		return nil, fmt.Errorf("build initial repository map: %w", err)
 	}
 	snapshot.Response.Revision = 1
+
+	// Best-effort: if bob is not installed, the server still starts normally;
+	// POST /api/impact will return 503 until bob becomes available.
+	var analyzer ImpactAnalyzer
+	var explainer FlowExplainer
+	var cache *bobCache
+	if runner, err := newBobRunner(root); err == nil {
+		cache = newBobCache(runner, runner, bobCachePath(root))
+		analyzer = cache
+		explainer = cache
+	}
+
 	return &mapWebServer{
 		root:        root,
 		repo:        repo,
 		worktree:    worktree,
 		opener:      opener,
 		options:     options,
+		analyzer:    analyzer,
+		explainer:   explainer,
+		bobCache:    cache,
 		snapshot:    snapshot,
 		subscribers: make(map[chan mapEvent]struct{}),
 	}, nil
@@ -132,6 +150,8 @@ func (server *mapWebServer) routes() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/graph", server.handleGraph)
 	mux.HandleFunc("POST /api/context", server.handleContext)
+	mux.HandleFunc("POST /api/impact", server.handleImpact)
+	mux.HandleFunc("POST /api/explain", server.handleExplain)
 	mux.HandleFunc("POST /api/open", server.handleOpen)
 	mux.HandleFunc("GET /events", server.handleEvents)
 
@@ -190,6 +210,148 @@ func (server *mapWebServer) handleContext(response http.ResponseWriter, request 
 	response.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(response).Encode(context); err != nil {
 		http.Error(response, "could not encode context", http.StatusInternalServerError)
+	}
+}
+
+func (server *mapWebServer) handleImpact(response http.ResponseWriter, request *http.Request) {
+	if !sameOrigin(request) {
+		http.Error(response, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(response, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var payload struct {
+		ID NodeID `json:"id"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || payload.ID == "" {
+		http.Error(response, "invalid impact request", http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		http.Error(response, "invalid impact request", http.StatusBadRequest)
+		return
+	}
+
+	// Step 1: build deterministic ImpactContext from the current snapshot.
+	server.mu.RLock()
+	snapshot := server.snapshot
+	server.mu.RUnlock()
+	impactContext, err := buildImpactContext(snapshot, payload.ID)
+	if err != nil {
+		if errors.Is(err, ErrFileUnchanged) {
+			http.Error(response, err.Error(), http.StatusUnprocessableEntity)
+		} else {
+			http.Error(response, err.Error(), http.StatusNotFound)
+		}
+		return
+	}
+
+	// Step 2: require Bob to be available.
+	if server.analyzer == nil {
+		http.Error(response, "bob is not installed; impact analysis is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Step 3: call Bob with the formatted context as prompt.
+	prompt := impactPromptFromContext(impactContext)
+	server.setBobCacheHeader(response, "impact", prompt)
+	analysis, err := server.analyzer.Analyse(request.Context(), prompt)
+	if err != nil {
+		writeBobError(response, err, "impact analysis")
+		return
+	}
+
+	// Step 4: return both the deterministic context and the Bob analysis.
+	response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(response).Encode(impactResponse{
+		Context:  impactContext,
+		Analysis: analysis,
+	}); err != nil {
+		http.Error(response, "could not encode impact response", http.StatusInternalServerError)
+	}
+}
+
+func (server *mapWebServer) handleExplain(response http.ResponseWriter, request *http.Request) {
+	if !sameOrigin(request) {
+		http.Error(response, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(response, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var payload struct {
+		IDs []NodeID `json:"ids"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || len(payload.IDs) == 0 {
+		http.Error(response, "invalid explain request", http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		http.Error(response, "invalid explain request", http.StatusBadRequest)
+		return
+	}
+
+	server.mu.RLock()
+	snapshot := server.snapshot
+	server.mu.RUnlock()
+	selection, err := buildSelectionContext(server.root, snapshot, payload.IDs)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if server.explainer == nil {
+		http.Error(response, "bob is not installed; flow explanation is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	server.setBobCacheHeader(response, "explain", selection.Prompt)
+	explanation, err := server.explainer.Explain(request.Context(), selection.Prompt)
+	if err != nil {
+		writeBobError(response, err, "flow explanation")
+		return
+	}
+
+	response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(response).Encode(explanation); err != nil {
+		http.Error(response, "could not encode explanation", http.StatusInternalServerError)
+	}
+}
+
+// setBobCacheHeader tells the UI whether this answer will come from the cache.
+func (server *mapWebServer) setBobCacheHeader(response http.ResponseWriter, kind, prompt string) {
+	if server.bobCache == nil {
+		return
+	}
+	status := "miss"
+	if server.bobCache.cached(kind, prompt) {
+		status = "hit"
+	}
+	response.Header().Set("X-Codemap-Bob-Cache", status)
+}
+
+// writeBobError maps Bob runner sentinels to HTTP statuses.
+func writeBobError(response http.ResponseWriter, err error, action string) {
+	switch {
+	case errors.Is(err, ErrBobNotAuthenticated):
+		http.Error(response, "bob is not authenticated", http.StatusUnauthorized)
+	case errors.Is(err, ErrBobTimeout):
+		http.Error(response, action+" timed out", http.StatusGatewayTimeout)
+	case errors.Is(err, ErrBobUnsuccessful):
+		http.Error(response, "bob could not complete the "+action+": "+err.Error(), http.StatusBadGateway)
+	case errors.Is(err, ErrBobBadOutput):
+		http.Error(response, "bob returned an unexpected response: "+err.Error(), http.StatusBadGateway)
+	default:
+		http.Error(response, action+" failed: "+err.Error(), http.StatusBadGateway)
 	}
 }
 
