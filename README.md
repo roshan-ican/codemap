@@ -17,7 +17,7 @@ Evidence of IBM Bob usage is in [`bob_sessions/`](bob_sessions/README.md).
 
 Original codemap demo:
 
-<video src="./assets/final-code-map.mov" controls muted width="100%"></video>
+https://github.com/user-attachments/assets/25099ef8-ec31-4a5c-b66c-78af5728a183
 
 [Watch the demo video](./assets/final-code-map.mov).
 
